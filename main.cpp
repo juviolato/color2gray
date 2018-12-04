@@ -1,4 +1,3 @@
-#include "widget.h"
 #include <QApplication>
 #include <QWidget>
 #include <QInputDialog>
@@ -15,16 +14,30 @@ int main(int argc, char *argv[])
     QApplication a(argc, argv);
 
     Dialog *popup = new Dialog();
+    popup->setInputTitle("Open image");
+    popup->setInputPrompt("Image file name:");
     QString fileName = popup->readUserInput();
-    Mat originalColorImage = imread(fileName.toUtf8().constData(), 1);
+    Mat originalColorImage = imread(fileName.toUtf8().constData());
+
+    Mat image;
+    image = imread(fileName.toUtf8().constData());
+
     ParameterHolder *parameters = new ParameterHolder();
+    double theta, alpha;
 
-    /* testando a rgb2cielab aqui */
-    imshow("HARU", originalColorImage);
-    originalColorImage = rgb2cielab(originalColorImage);
-    imwrite("lab.jpg", originalColorImage);
+    popup->setInputTitle("Parameter definition");
+    popup->setInputPrompt("Theta value in degrees (default is 45º):");
+    theta = popup->readUserInput().toDouble();
+    theta *= PI/180;        // Converte theta para radianos
 
-    color2gray(originalColorImage, *parameters);
+    popup->setInputPrompt("Alpha value (default is 10):");
+    alpha = popup->readUserInput().toDouble();
 
-    return a.exec();
+    parameters->theta = theta;
+    parameters->alpha = alpha;
+
+    image = color2gray(image, *parameters);
+    imwrite("out.jpg", image);
+
+    return 0;
 }
