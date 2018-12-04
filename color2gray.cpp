@@ -2,7 +2,9 @@
 
 Mat rgb2cielab(Mat original)
 {
-    Mat cielab;
+    int width{original.cols}, height{original.rows};
+    Mat cielab(height, width, CV_8UC3);
+
     cvtColor(original, cielab, COLOR_BGR2Lab);
 
     return cielab;
@@ -10,22 +12,23 @@ Mat rgb2cielab(Mat original)
 
 double crunch(double value, double alpha)
 {
-    return alpha * tanh(value / alpha);
+    if (alpha > 0)
+        return alpha * tanh(value / alpha);
+    else
+        return 0;
 }
 
-double dotProduct2(Vec2b v, Vec2b u)
+double findDelta(double deltaL, double deltaA, double deltaB, double theta, double alpha)
 {
-    return v[0]*u[0] + v[1]*u[1];
-}
-
-double findDelta(double deltaL, Vec2b deltaAB, double deltaABNorm, double theta, double alpha)
-{
-    Vec2b vtheta = Vec2b(static_cast<uchar>(cos(theta)), static_cast<uchar>(sin(theta)));
     double delta;
+    double deltaABNorm, dotproductABTheta;
+
+    deltaABNorm = sqrt(pow(deltaA, 2) + pow(deltaB, 2));
+    dotproductABTheta = deltaA * cos(theta) + deltaB * sin(theta);
 
     if (fabs(deltaL) > crunch(deltaABNorm, alpha))
         delta = deltaL;
-    else if (dotProduct2(deltaAB, vtheta) >=0)
+    else if (dotproductABTheta >=0)
         delta = crunch(deltaABNorm, alpha);
     else
         delta = crunch(-deltaABNorm, alpha);
@@ -35,49 +38,65 @@ double findDelta(double deltaL, Vec2b deltaAB, double deltaABNorm, double theta,
 
 Mat color2gray(Mat original, ParameterHolder parameters)
 {
-    int width{original.cols}, height{original.rows};
-
-    vector<double> pixel1ColumnPosition(static_cast<ulong>(height), 0);
-    vector< vector<double> > pixel1RowPosition(static_cast<ulong>(width), pixel1ColumnPosition);
-    vector< vector< vector<double> > > pixel2ColumnPosition(static_cast<ulong>(height), pixel1RowPosition);
-    vector< vector< vector< vector<double> > > > delta(static_cast<ulong>(width), pixel2ColumnPosition);
+    int width{original.cols}, height{original.rows}, N{width*height};
 
     // Passo 1: converter a imagem para o espaço CIE L*a*b*
-    Mat cielabImg = rgb2cielab(original);
-    Mat gray;
+    Mat cielabImg(height, width, CV_8UC3);
+    cielabImg = rgb2cielab(original);
 
     // Passo 2: encontrar as target differences
     Vec3b labPixel1, labPixel2;
     double deltaL, deltaA, deltaB;
-    Vec2b deltaAB;
 
-    for (int i = 0; i < width; i++)
+    vector<double> delta(static_cast<ulong>(N), 0);
+    vector<double> luminance1d(static_cast<ulong>(N));
+    vector<double> channelA1d(static_cast<ulong>(N));
+    vector<double> channelB1d(static_cast<ulong>(N));
+
+    for (int i = 0; i < height; i++)
     {
-        for (int j = 0; j < height; j++)
+        for (int j = 0; j < width; j++)
         {
-            for (int k = 0; k < width; k++)
-            {
-                for (int l = 0; l < height; l++)
-                {
-                    labPixel1 = cielabImg.at<Vec3b>(i, j);
-                    labPixel2 = cielabImg.at<Vec3b>(k, l);
-
-                    deltaL = labPixel1[LUMINANCE] - labPixel2[LUMINANCE];
-                    deltaA = labPixel1[CHANNEL_A] - labPixel2[CHANNEL_A];
-                    deltaB = labPixel1[CHANNEL_B] - labPixel2[CHANNEL_B];
-
-                    deltaAB = Vec2b(static_cast<uchar>(deltaA), static_cast<uchar>(deltaB));
-                    delta[static_cast<ulong>(i)][static_cast<ulong>(j)][static_cast<ulong>(k)][static_cast<ulong>(l)] = findDelta(deltaL, deltaAB, norm(deltaAB), parameters.theta, parameters.alpha);
-                }
-            }
+            luminance1d[static_cast<ulong>(i * width + j)] = cielabImg.at<Vec3b>(i, j)[LUMINANCE];
+            channelA1d[static_cast<ulong>(i * width + j)] = cielabImg.at<Vec3b>(i, j)[CHANNEL_A];
+            channelB1d[static_cast<ulong>(i * width + j)] = cielabImg.at<Vec3b>(i, j)[CHANNEL_B];
         }
     }
 
-    // Passo 3: otimizar
-    // dado um conjunto de diferenças deltaij, encontramos uma imagem g em tons de cinza que minimiza a função f(g), definida como o somatório: para todo par ordenado de pixels (i, j) num conjunto K,
-    // ((g(i) - g(j)) - deltaij)^2
-    // inicializar g como o canal de luminância da imagem original
-    // aqui não entendi como fazer nao
+    for (int i = 0; i < N; i++)
+    {
+        for (int j = 0; j < N; j++)
+        {
+            deltaL = luminance1d[static_cast<ulong>(i)] - luminance1d[static_cast<ulong>(j)];
+            deltaA = channelA1d[static_cast<ulong>(i)] - channelA1d[static_cast<ulong>(j)];
+            deltaB = channelB1d[static_cast<ulong>(i)] - channelB1d[static_cast<ulong>(j)];
+
+            double d = findDelta(deltaL, deltaA, deltaB, parameters.theta, parameters.alpha);
+            delta[static_cast<ulong>(i)] += d;
+        }
+    }
+
+    // Passo 3: resolver a otimizacao
+    Mat gray(height, width, CV_8UC3, Scalar(0));
+
+    for (int i = 1; i < N; i++)
+    {
+        luminance1d[static_cast<ulong>(i)] = delta[static_cast<ulong>(i)] - delta[static_cast<ulong>(i-1)] + N * luminance1d[static_cast<ulong>(i-1)];
+        luminance1d[static_cast<ulong>(i)] /= static_cast<double>(N);
+    }
+
+    for (int i = 0; i < height; i++)
+    {
+        for (int j = 0; j < width; j++)
+        {
+            Vec3b newValue;
+            newValue[0] = newValue[1] = newValue[2] = static_cast<uchar>(luminance1d[static_cast<ulong>(i * width + j)]);
+            gray.at<Vec3b>(i, j) = newValue;
+        }
+    }
+
+    imshow("Gray", gray);
+    waitKey(0);
 
     return gray;
 }
