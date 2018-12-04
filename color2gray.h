@@ -2,7 +2,7 @@
 #define COLOR2GRAY_H
 
 #include <iostream>
-#include <cmath>
+#include <math.h>
 #include <vector>
 #include <opencv2/opencv.hpp>
 using namespace cv;
@@ -41,7 +41,7 @@ double crunch(double value, double alpha);
 
 double dotProduct2(Vec2b v, Vec2b u);
 
-double findDelta(double deltaL, Vec2b deltaAB, double deltaABNorm, double theta, double alpha);
+double findDelta(double deltaL, double deltaA, double deltaB, double theta, double alpha);
 
 Mat color2gray(Mat original, ParameterHolder parameters);
 
